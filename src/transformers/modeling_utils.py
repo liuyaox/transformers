@@ -2289,8 +2289,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
         # save the string version of dtype to the config, e.g. convert torch.float32 => "float32"
         # we currently don't use this setting automatically, but may start to use with v5
-        dtype = get_parameter_dtype(model_to_save)
-        model_to_save.config.torch_dtype = str(dtype).split(".")[1]
+        dtype = get_parameter_dtype(model_to_save)                      # YAO: 从模型本身推测dtype，不接受dtype传参
+        model_to_save.config.torch_dtype = str(dtype).split(".")[1]     # YAO: 在config中写入torch_type
 
         # Attach architecture to the config
         model_to_save.config.architectures = [model_to_save.__class__.__name__]
@@ -3051,26 +3051,27 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         if pretrained_model_name_or_path is not None:
             pretrained_model_name_or_path = str(pretrained_model_name_or_path)
             is_local = os.path.isdir(pretrained_model_name_or_path)
+            # YAO: from_tf和from_flax默认为False，所以优先使用.safetensors（前提是safetensors有安装），其次是.bin
             if is_local:
                 if from_tf and os.path.isfile(
                     os.path.join(pretrained_model_name_or_path, subfolder, TF_WEIGHTS_NAME + ".index")
                 ):
-                    # Load from a TF 1.0 checkpoint in priority if from_tf
+                    # Load from a TF 1.0 checkpoint in priority if from_tf      YAO: model.ckpt
                     archive_file = os.path.join(pretrained_model_name_or_path, subfolder, TF_WEIGHTS_NAME + ".index")
                 elif from_tf and os.path.isfile(
                     os.path.join(pretrained_model_name_or_path, subfolder, TF2_WEIGHTS_NAME)
                 ):
-                    # Load from a TF 2.0 checkpoint in priority if from_tf
+                    # Load from a TF 2.0 checkpoint in priority if from_tf      YAO: tf_model.h5
                     archive_file = os.path.join(pretrained_model_name_or_path, subfolder, TF2_WEIGHTS_NAME)
                 elif from_flax and os.path.isfile(
                     os.path.join(pretrained_model_name_or_path, subfolder, FLAX_WEIGHTS_NAME)
                 ):
-                    # Load from a Flax checkpoint in priority if from_flax
+                    # Load from a Flax checkpoint in priority if from_flax      YAO: flax_model.msgpack
                     archive_file = os.path.join(pretrained_model_name_or_path, subfolder, FLAX_WEIGHTS_NAME)
                 elif use_safetensors is not False and os.path.isfile(
                     os.path.join(pretrained_model_name_or_path, subfolder, _add_variant(SAFE_WEIGHTS_NAME, variant))
                 ):
-                    # Load from a safetensors checkpoint
+                    # Load from a safetensors checkpoint                        YAO: model.safetensors
                     archive_file = os.path.join(
                         pretrained_model_name_or_path, subfolder, _add_variant(SAFE_WEIGHTS_NAME, variant)
                     )
@@ -3079,7 +3080,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                         pretrained_model_name_or_path, subfolder, _add_variant(SAFE_WEIGHTS_INDEX_NAME, variant)
                     )
                 ):
-                    # Load from a sharded safetensors checkpoint
+                    # Load from a sharded safetensors checkpoint                YAO: model.safetensors.index.json
                     archive_file = os.path.join(
                         pretrained_model_name_or_path, subfolder, _add_variant(SAFE_WEIGHTS_INDEX_NAME, variant)
                     )
@@ -3087,14 +3088,14 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 elif os.path.isfile(
                     os.path.join(pretrained_model_name_or_path, subfolder, _add_variant(WEIGHTS_NAME, variant))
                 ):
-                    # Load from a PyTorch checkpoint
+                    # Load from a PyTorch checkpoint                            YAO: pytorch_model.bin
                     archive_file = os.path.join(
                         pretrained_model_name_or_path, subfolder, _add_variant(WEIGHTS_NAME, variant)
                     )
                 elif os.path.isfile(
                     os.path.join(pretrained_model_name_or_path, subfolder, _add_variant(WEIGHTS_INDEX_NAME, variant))
                 ):
-                    # Load from a sharded PyTorch checkpoint
+                    # Load from a sharded PyTorch checkpoint                    YAO: pytorch_model.bin.index.json
                     archive_file = os.path.join(
                         pretrained_model_name_or_path, subfolder, _add_variant(WEIGHTS_INDEX_NAME, variant)
                     )
@@ -3317,7 +3318,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             # we also may have config.torch_dtype available, but we won't rely on it till v5
             dtype_orig = None
 
-            if torch_dtype is not None:
+            if torch_dtype is not None:     # YAO: TODO 若torch_dtype是None呢？？？
                 if isinstance(torch_dtype, str):
                     if torch_dtype == "auto":
                         if hasattr(config, "torch_dtype") and config.torch_dtype is not None:
