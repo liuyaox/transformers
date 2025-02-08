@@ -797,9 +797,9 @@ class WandbCallback(TrainerCallback):
             init_args = {}
             if trial_name is not None:
                 init_args["name"] = trial_name
-                init_args["group"] = args.run_name
+                init_args["group"] = args.run_name      # YAO：奇怪，run_name当作group?
             elif args.run_name is not None:
-                init_args["name"] = args.run_name
+                init_args["name"] = args.run_name       # YAO: run_name当作wandb的任务名  TODO group呢？
                 if args.run_name == args.output_dir:
                     self._wandb.termwarn(
                         "The `run_name` is currently set to the same value as `TrainingArguments.output_dir`. If this was "
