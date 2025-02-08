@@ -422,6 +422,7 @@ class SEWDModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             model = model_class(config=configs_no_init)
             for name, param in model.named_parameters():
                 uniform_init_parms = [
+                    "conv.parametrizations.weight",
                     "conv.weight",
                     "masked_spec_embed",
                     "quantizer.weight_proj.weight",
@@ -508,9 +509,7 @@ class SEWDModelIntegrationTest(unittest.TestCase):
     def _load_datasamples(self, num_samples):
         from datasets import load_dataset
 
-        ds = load_dataset(
-            "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation", trust_remote_code=True
-        )
+        ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
         # automatic decoding with librispeech
         speech_samples = ds.sort("id").filter(
             lambda x: x["id"] in [f"1272-141231-000{i}" for i in range(num_samples)]
@@ -568,8 +567,8 @@ class SEWDModelIntegrationTest(unittest.TestCase):
         )
         expected_output_sum = 54201.0469
 
-        self.assertTrue(torch.allclose(outputs[:, :4, :4], expected_outputs_first, atol=1e-3))
-        self.assertTrue(torch.allclose(outputs[:, -4:, -4:], expected_outputs_last, atol=1e-3))
+        torch.testing.assert_close(outputs[:, :4, :4], expected_outputs_first, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(outputs[:, -4:, -4:], expected_outputs_last, rtol=1e-3, atol=1e-3)
         self.assertTrue(abs(outputs.sum() - expected_output_sum) < 1)
 
     def test_inference_ctc_batched(self):

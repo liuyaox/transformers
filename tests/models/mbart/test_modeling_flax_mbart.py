@@ -74,7 +74,7 @@ def prepare_mbart_inputs_dict(
     }
 
 
-class FlaxMBartModelTester(unittest.TestCase):
+class FlaxMBartModelTester:
     def __init__(
         self,
         parent,

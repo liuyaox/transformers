@@ -40,11 +40,11 @@ if is_torch_available():
         ReformerForMaskedLM,
         ReformerForQuestionAnswering,
         ReformerForSequenceClassification,
-        ReformerLayer,
         ReformerModel,
         ReformerModelWithLMHead,
         ReformerTokenizer,
     )
+    from transformers.models.reformer.modeling_reformer import ReformerLayer
 
 
 class ReformerModelTester:
@@ -53,6 +53,7 @@ class ReformerModelTester:
         parent,
         batch_size=13,
         seq_length=32,
+        text_seq_length=None,
         is_training=True,
         is_decoder=True,
         use_input_mask=True,
@@ -128,6 +129,7 @@ class ReformerModelTester:
         self.attn_layers = attn_layers
         self.pad_token_id = pad_token_id
         self.hash_seed = hash_seed
+        self.text_seq_length = text_seq_length or seq_length
 
         attn_chunk_length = local_attn_chunk_length if local_attn_chunk_length is not None else lsh_attn_chunk_length
         num_chunks_after = local_num_chunks_after if local_num_chunks_after is not None else lsh_num_chunks_after
@@ -608,7 +610,7 @@ class ReformerLocalAttnModelTest(ReformerTesterMixin, GenerationTesterMixin, Mod
     test_sequence_classification_problem_types = True
 
     def setUp(self):
-        self.model_tester = ReformerModelTester(self)
+        self.model_tester = ReformerModelTester(self, text_seq_length=16)
         self.config_tester = ConfigTester(self, config_class=ReformerConfig, hidden_size=37)
 
     @slow
@@ -684,17 +686,15 @@ class ReformerLocalAttnModelTest(ReformerTesterMixin, GenerationTesterMixin, Mod
     def test_left_padding_compatibility(self):
         pass
 
-    def _get_input_ids_and_config(self, batch_size=2):
+    def prepare_config_and_inputs_for_generate(self, *args, **kwargs):
         # override because overwise we hit max possible seq length for model (4*8=32)
         # decreasing the seq_length in tester causes errors for "training_tests", those need exactly max seq length
         # NOTE: seq_length has to be multiple of 4, otherwise it fails for other tests
-        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-        input_ids = inputs_dict[self.input_name]
-        input_ids = input_ids[:batch_size, :16]
-        attention_mask = torch.ones_like(input_ids, dtype=torch.long)[:batch_size, :16]
-        config.eos_token_id = None
-        config.forced_eos_token_id = None
-        return config, input_ids, attention_mask
+        original_sequence_length = self.model_tester.seq_length
+        self.model_tester.seq_length = self.model_tester.text_seq_length
+        test_inputs = super().prepare_config_and_inputs_for_generate(*args, **kwargs)
+        self.model_tester.seq_length = original_sequence_length
+        return test_inputs
 
 
 @require_torch
@@ -725,10 +725,17 @@ class ReformerLSHAttnModelTest(
 
     # TODO: Fix the failed tests
     def is_pipeline_test_to_skip(
-        self, pipeline_test_casse_name, config_class, model_architecture, tokenizer_name, processor_name
+        self,
+        pipeline_test_case_name,
+        config_class,
+        model_architecture,
+        tokenizer_name,
+        image_processor_name,
+        feature_extractor_name,
+        processor_name,
     ):
         if (
-            pipeline_test_casse_name == "QAPipelineTests"
+            pipeline_test_case_name == "QAPipelineTests"
             and tokenizer_name is not None
             and not tokenizer_name.endswith("Fast")
         ):
@@ -1088,7 +1095,7 @@ class ReformerIntegrationTests(unittest.TestCase):
             dtype=torch.float,
             device=torch_device,
         )
-        self.assertTrue(torch.allclose(output_slice, expected_output_slice, atol=1e-3))
+        torch.testing.assert_close(output_slice, expected_output_slice, rtol=1e-3, atol=1e-3)
 
     def test_lsh_layer_forward_complex(self):
         config = self._get_basic_config_and_input()
@@ -1111,7 +1118,7 @@ class ReformerIntegrationTests(unittest.TestCase):
             dtype=torch.float,
             device=torch_device,
         )
-        self.assertTrue(torch.allclose(output_slice, expected_output_slice, atol=1e-3))
+        torch.testing.assert_close(output_slice, expected_output_slice, rtol=1e-3, atol=1e-3)
 
     def test_local_layer_forward(self):
         config = self._get_basic_config_and_input()
@@ -1129,7 +1136,7 @@ class ReformerIntegrationTests(unittest.TestCase):
             dtype=torch.float,
             device=torch_device,
         )
-        self.assertTrue(torch.allclose(output_slice, expected_output_slice, atol=1e-3))
+        torch.testing.assert_close(output_slice, expected_output_slice, rtol=1e-3, atol=1e-3)
 
     def test_local_layer_forward_complex(self):
         config = self._get_basic_config_and_input()
@@ -1151,7 +1158,7 @@ class ReformerIntegrationTests(unittest.TestCase):
             dtype=torch.float,
             device=torch_device,
         )
-        self.assertTrue(torch.allclose(output_slice, expected_output_slice, atol=1e-3))
+        torch.testing.assert_close(output_slice, expected_output_slice, rtol=1e-3, atol=1e-3)
 
     def test_lsh_model_forward(self):
         config = self._get_basic_config_and_input()
@@ -1168,7 +1175,7 @@ class ReformerIntegrationTests(unittest.TestCase):
             dtype=torch.float,
             device=torch_device,
         )
-        self.assertTrue(torch.allclose(output_slice, expected_output_slice, atol=1e-3))
+        torch.testing.assert_close(output_slice, expected_output_slice, rtol=1e-3, atol=1e-3)
 
     def test_local_model_forward(self):
         config = self._get_basic_config_and_input()
@@ -1184,7 +1191,7 @@ class ReformerIntegrationTests(unittest.TestCase):
             dtype=torch.float,
             device=torch_device,
         )
-        self.assertTrue(torch.allclose(output_slice, expected_output_slice, atol=1e-3))
+        torch.testing.assert_close(output_slice, expected_output_slice, rtol=1e-3, atol=1e-3)
 
     def test_lm_model_forward(self):
         config = self._get_basic_config_and_input()
@@ -1203,7 +1210,7 @@ class ReformerIntegrationTests(unittest.TestCase):
             device=torch_device,
         )
 
-        self.assertTrue(torch.allclose(output_slice, expected_output_slice, atol=1e-3))
+        torch.testing.assert_close(output_slice, expected_output_slice, rtol=1e-3, atol=1e-3)
 
     def test_local_lm_model_grad(self):
         config = self._get_basic_config_and_input()
@@ -1217,7 +1224,9 @@ class ReformerIntegrationTests(unittest.TestCase):
         input_ids, _ = self._get_input_ids_and_mask()
         loss = model(input_ids=input_ids, labels=input_ids)[0]
 
-        self.assertTrue(torch.allclose(loss, torch.tensor(5.8019, dtype=torch.float, device=torch_device), atol=1e-3))
+        torch.testing.assert_close(
+            loss, torch.tensor(5.8019, dtype=torch.float, device=torch_device), rtol=1e-3, atol=1e-3
+        )
         loss.backward()
 
         # check last grads to cover all proable errors
@@ -1239,9 +1248,9 @@ class ReformerIntegrationTests(unittest.TestCase):
             dtype=torch.float,
             device=torch_device,
         )
-        self.assertTrue(torch.allclose(grad_slice_word, expected_grad_slice_word, atol=1e-3))
-        self.assertTrue(torch.allclose(grad_slice_position_factor_1, expected_grad_slice_pos_fac_1, atol=1e-3))
-        self.assertTrue(torch.allclose(grad_slice_position_factor_2, expected_grad_slice_pos_fac_2, atol=1e-3))
+        torch.testing.assert_close(grad_slice_word, expected_grad_slice_word, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(grad_slice_position_factor_1, expected_grad_slice_pos_fac_1, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(grad_slice_position_factor_2, expected_grad_slice_pos_fac_2, rtol=1e-3, atol=1e-3)
 
     def test_lsh_lm_model_grad(self):
         config = self._get_basic_config_and_input()
@@ -1257,7 +1266,9 @@ class ReformerIntegrationTests(unittest.TestCase):
         input_ids, _ = self._get_input_ids_and_mask()
         loss = model(input_ids=input_ids, labels=input_ids)[0]
 
-        self.assertTrue(torch.allclose(loss, torch.tensor(5.7854, dtype=torch.float, device=torch_device), atol=1e-3))
+        torch.testing.assert_close(
+            loss, torch.tensor(5.7854, dtype=torch.float, device=torch_device), rtol=1e-3, atol=1e-3
+        )
         loss.backward()
         # check last grads to cover all proable errors
         grad_slice_word = model.reformer.embeddings.word_embeddings.weight.grad[0, :5]
@@ -1278,9 +1289,9 @@ class ReformerIntegrationTests(unittest.TestCase):
             dtype=torch.float,
             device=torch_device,
         )
-        self.assertTrue(torch.allclose(grad_slice_word, expected_grad_slice_word, atol=1e-3))
-        self.assertTrue(torch.allclose(grad_slice_position_factor_1, expected_grad_slice_pos_fac_1, atol=1e-3))
-        self.assertTrue(torch.allclose(grad_slice_position_factor_2, expected_grad_slice_pos_fac_2, atol=1e-3))
+        torch.testing.assert_close(grad_slice_word, expected_grad_slice_word, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(grad_slice_position_factor_1, expected_grad_slice_pos_fac_1, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(grad_slice_position_factor_2, expected_grad_slice_pos_fac_2, rtol=1e-3, atol=1e-3)
 
     @slow
     def test_pretrained_generate_crime_and_punish(self):

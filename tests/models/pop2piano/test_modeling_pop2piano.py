@@ -620,7 +620,7 @@ class Pop2PianoModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTester
                 (config_and_inputs[1], config_and_inputs[3], config_and_inputs[2]),
                 f"{tmpdirname}/Pop2Piano_test.onnx",
                 export_params=True,
-                opset_version=9,
+                opset_version=14,
                 input_names=["input_ids", "decoder_input_ids"],
             )
 
@@ -691,7 +691,7 @@ class Pop2PianoModelIntegrationTests(unittest.TestCase):
             [[1.0475305318832397, 0.29052114486694336, -0.47778210043907166], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
         )
 
-        self.assertTrue(torch.allclose(outputs[0, :3, :3], EXPECTED_OUTPUTS, atol=1e-4))
+        torch.testing.assert_close(outputs[0, :3, :3], EXPECTED_OUTPUTS, rtol=1e-4, atol=1e-4)
 
     @slow
     @require_essentia

@@ -44,16 +44,16 @@ class WhisperFeatureExtractor(SequenceFeatureExtractor):
     Fourier Transform` which should match pytorch's `torch.stft` equivalent.
 
     Args:
-        feature_size (`int`, defaults to 80):
+        feature_size (`int`, *optional*, defaults to 80):
             The feature dimension of the extracted features.
-        sampling_rate (`int`, defaults to 16000):
+        sampling_rate (`int`, *optional*, defaults to 16000):
             The sampling rate at which the audio files should be digitalized expressed in hertz (Hz).
-        hop_length (`int`, defaults to 160):
+        hop_length (`int`, *optional*, defaults to 160):
             Length of the overlaping windows for the STFT used to obtain the Mel Frequency coefficients.
-        chunk_length (`int`, defaults to 30):
+        chunk_length (`int`, *optional*, defaults to 30):
             The maximum number of chuncks of `sampling_rate` samples used to trim and pad longer or shorter audio
             sequences.
-        n_fft (`int`, defaults to 400):
+        n_fft (`int`, *optional*, defaults to 400):
             Size of the Fourier transform.
         padding_value (`float`, *optional*, defaults to 0.0):
             Padding value used to pad the audio. Should correspond to silences.
@@ -129,18 +129,13 @@ class WhisperFeatureExtractor(SequenceFeatureExtractor):
         Compute the log-mel spectrogram of the audio using PyTorch's GPU-accelerated STFT implementation with batching,
         yielding results similar to cpu computing with 1e-5 tolerance.
         """
-        waveform = torch.from_numpy(waveform).type(torch.float32)
+        waveform = torch.from_numpy(waveform).to(device, torch.float32)
+        window = torch.hann_window(self.n_fft, device=device)
 
-        window = torch.hann_window(self.n_fft)
-        if device != "cpu":
-            waveform = waveform.to(device)
-            window = window.to(device)
         stft = torch.stft(waveform, self.n_fft, self.hop_length, window=window, return_complex=True)
         magnitudes = stft[..., :-1].abs() ** 2
 
-        mel_filters = torch.from_numpy(self.mel_filters).type(torch.float32)
-        if device != "cpu":
-            mel_filters = mel_filters.to(device)
+        mel_filters = torch.from_numpy(self.mel_filters).to(device, torch.float32)
         mel_spec = mel_filters.T @ magnitudes
 
         log_spec = torch.clamp(mel_spec, min=1e-10).log10()
@@ -231,7 +226,7 @@ class WhisperFeatureExtractor(SequenceFeatureExtractor):
                 The sampling rate at which the `raw_speech` input was sampled. It is strongly recommended to pass
                 `sampling_rate` at the forward call to prevent silent errors and allow automatic speech recognition
                 pipeline.
-            padding_value (`float`, defaults to 0.0):
+            padding_value (`float`, *optional*, defaults to 0.0):
                 The value that is used to fill the padding values / vectors.
             do_normalize (`bool`, *optional*, defaults to `False`):
                 Whether or not to zero-mean unit-variance normalize the input. Normalizing can help to significantly
@@ -322,3 +317,6 @@ class WhisperFeatureExtractor(SequenceFeatureExtractor):
             padded_inputs = padded_inputs.convert_to_tensors(return_tensors)
 
         return padded_inputs
+
+
+__all__ = ["WhisperFeatureExtractor"]

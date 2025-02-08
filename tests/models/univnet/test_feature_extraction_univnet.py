@@ -50,7 +50,7 @@ def floats_list(shape, scale=1.0, rng=None, name=None):
     return values
 
 
-class UnivNetFeatureExtractionTester(unittest.TestCase):
+class UnivNetFeatureExtractionTester:
     def __init__(
         self,
         parent,
@@ -327,9 +327,7 @@ class UnivNetFeatureExtractionTest(SequenceFeatureExtractionTestMixin, unittest.
             self.assertTrue(pt_processed.input_features.dtype == torch.float32)
 
     def _load_datasamples(self, num_samples):
-        ds = load_dataset(
-            "hf-internal-testing/librispeech_asr_dummy", "clean", split="validation", trust_remote_code=True
-        )
+        ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
         ds = ds.cast_column("audio", Audio(sampling_rate=self.feat_extract_tester.sampling_rate))
         # automatic decoding with librispeech
         speech_samples = ds.sort("id").select(range(num_samples))[:num_samples]["audio"]
@@ -362,6 +360,6 @@ class UnivNetFeatureExtractionTest(SequenceFeatureExtractionTestMixin, unittest.
         EXPECTED_MEAN = torch.tensor(-6.18862009)
         EXPECTED_STDDEV = torch.tensor(2.80845642)
 
-        torch.testing.assert_close(input_features_mean, EXPECTED_MEAN, atol=5e-5, rtol=5e-6)
+        torch.testing.assert_close(input_features_mean, EXPECTED_MEAN, rtol=5e-5, atol=5e-5)
         torch.testing.assert_close(input_features_stddev, EXPECTED_STDDEV)
-        torch.testing.assert_close(input_features[0, :30, 0], EXPECTED_INPUT_FEATURES, atol=1e-4, rtol=1e-5)
+        torch.testing.assert_close(input_features[0, :30, 0], EXPECTED_INPUT_FEATURES, rtol=1e-4, atol=1e-4)

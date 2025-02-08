@@ -15,6 +15,7 @@
 """Image processor class for MaskFormer."""
 
 import math
+import warnings
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import numpy as np
@@ -614,7 +615,7 @@ class MaskFormerImageProcessor(BaseImageProcessor):
         """Preprocesses a single image."""
         # All transformations expect numpy arrays.
         image = to_numpy_array(image)
-        if is_scaled_image(image) and do_rescale:
+        if do_rescale and is_scaled_image(image):
             logger.warning_once(
                 "It looks like you are trying to rescale already rescaled images. If the input"
                 " images have pixel values between 0 and 1, set `do_rescale=False` to avoid rescaling them again."
@@ -987,7 +988,7 @@ class MaskFormerImageProcessor(BaseImageProcessor):
             `torch.Tensor`:
                 A tensor of shape (`batch_size, num_class_labels, height, width`).
         """
-        logger.warning(
+        warnings.warn(
             "`post_process_segmentation` is deprecated and will be removed in v5 of Transformers, please use"
             " `post_process_instance_segmentation`",
             FutureWarning,
@@ -1079,7 +1080,8 @@ class MaskFormerImageProcessor(BaseImageProcessor):
     ) -> List[Dict]:
         """
         Converts the output of [`MaskFormerForInstanceSegmentationOutput`] into instance segmentation predictions. Only
-        supports PyTorch.
+        supports PyTorch. If instances could overlap, set either return_coco_annotation or return_binary_maps
+        to `True` to get the correct segmentation result.
 
         Args:
             outputs ([`MaskFormerForInstanceSegmentation`]):
@@ -1101,9 +1103,10 @@ class MaskFormerImageProcessor(BaseImageProcessor):
                 (one per detected instance).
         Returns:
             `List[Dict]`: A list of dictionaries, one per image, each dictionary containing two keys:
-            - **segmentation** -- A tensor of shape `(height, width)` where each pixel represents a `segment_id` or
+            - **segmentation** -- A tensor of shape `(height, width)` where each pixel represents a `segment_id`, or
               `List[List]` run-length encoding (RLE) of the segmentation map if return_coco_annotation is set to
-              `True`. Set to `None` if no mask if found above `threshold`.
+              `True`, or a tensor of shape `(num_instances, height, width)` if return_binary_maps is set to `True`.
+              Set to `None` if no mask if found above `threshold`.
             - **segments_info** -- A dictionary that contains additional information on each segment.
                 - **id** -- An integer representing the `segment_id`.
                 - **label_id** -- An integer representing the label / semantic class id corresponding to `segment_id`.
@@ -1270,3 +1273,6 @@ class MaskFormerImageProcessor(BaseImageProcessor):
 
             results.append({"segmentation": segmentation, "segments_info": segments})
         return results
+
+
+__all__ = ["MaskFormerImageProcessor"]
