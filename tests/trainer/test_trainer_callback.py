@@ -102,6 +102,9 @@ class MyTestTrainerCallback(TrainerCallback):
     def on_prediction_step(self, args, state, control, **kwargs):
         self.events.append("on_prediction_step")
 
+    def on_push_begin(self, args, state, control, **kwargs):
+        self.events.append("on_push_begin")
+
 
 @require_torch
 class TrainerCallbackTest(unittest.TestCase):
@@ -425,3 +428,32 @@ class TrainerCallbackTest(unittest.TestCase):
         trainer.state = TrainerState.load_from_json(os.path.join(checkpoint, TRAINER_STATE_NAME))
         trainer._load_callback_state()
         assert trainer.control.should_training_stop
+
+    def test_no_duplicate_save_on_epoch_save_strategy(self):
+        times_saved = 0
+
+        class OnEndCallback(TrainerCallback):
+            def on_step_end(self, args: TrainingArguments, state: TrainerState, control, **kwargs):
+                nonlocal times_saved
+                if control.should_save:
+                    times_saved += 1
+
+            def on_epoch_end(self, args: TrainingArguments, state: TrainerState, control, **kwargs):
+                nonlocal times_saved
+                if control.should_save:
+                    times_saved += 1
+
+        trainer = self.get_trainer(max_steps=2, save_strategy="epoch", callbacks=[OnEndCallback])
+        trainer.train()
+        assert times_saved == 1
+
+    def test_on_push_begin(self):
+        trainer = self.get_trainer(callbacks=[MyTestTrainerCallback], max_steps=1)
+        trainer.train()
+        callback = [cb for cb in trainer.callback_handler.callbacks if isinstance(cb, MyTestTrainerCallback)][0]
+        initial_event_count = len(callback.events)
+
+        trainer.callback_handler.on_push_begin(trainer.args, trainer.state, trainer.control)
+        assert "on_push_begin" in callback.events
+        assert callback.events.count("on_push_begin") == 1
+        assert len(callback.events) == initial_event_count + 1

@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2024 the Fast authors and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -37,7 +36,6 @@ from ...test_pipeline_mixin import PipelineTesterMixin
 
 if is_torch_available():
     import torch
-    from torch import nn
 
     from transformers import TextNetBackbone, TextNetForImageClassification, TextNetModel
 
@@ -213,10 +211,8 @@ class TextNetModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
         else {}
     )
 
-    fx_compatible = False
-    test_pruning = False
     test_resize_embeddings = False
-    test_head_masking = False
+    test_torch_exportable = True
     has_attentions = False
 
     def setUp(self):
@@ -246,22 +242,6 @@ class TextNetModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
     def test_backbone(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_backbone(*config_and_inputs)
-
-    def test_initialization(self):
-        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config=config)
-            for name, module in model.named_modules():
-                if isinstance(module, (nn.BatchNorm2d, nn.GroupNorm)):
-                    self.assertTrue(
-                        torch.all(module.weight == 1),
-                        msg=f"Parameter {name} of model {model_class} seems not properly initialized",
-                    )
-                    self.assertTrue(
-                        torch.all(module.bias == 0),
-                        msg=f"Parameter {name} of model {model_class} seems not properly initialized",
-                    )
 
     def test_hidden_states_output(self):
         def check_hidden_states_output(inputs_dict, config, model_class):
@@ -327,14 +307,18 @@ class TextNetModelIntegrationTest(unittest.TestCase):
         with torch.no_grad():
             output = model(**inputs)
 
-        # verify logits
-        self.assertEqual(output.logits.shape, torch.Size([1, 2]))
+        # verify output
+        self.assertEqual(output.last_hidden_state.shape, torch.Size([1, 512, 20, 27]))
         expected_slice_backbone = torch.tensor(
-            [0.9210, 0.6099, 0.0000, 0.0000, 0.0000, 0.0000, 3.2207, 2.6602, 1.8925, 0.0000],
+            [
+                [0.0000, 1.7415, 1.2660],
+                [0.0000, 1.0084, 1.9692],
+                [0.0000, 1.7464, 1.7892],
+            ],
             device=torch_device,
         )
         torch.testing.assert_close(
-            output.feature_maps[-1][0][10][12][:10], expected_slice_backbone, rtol=1e-3, atol=1e-3
+            output.last_hidden_state[0, 12, :3, :3], expected_slice_backbone, rtol=1e-2, atol=1e-2
         )
 
 

@@ -12,26 +12,26 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from functools import partial
-from typing import List, Optional
+import warnings
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from ...configuration_utils import PretrainedConfig
-from ...utils import logging
+from ... import initialization as init
+from ...configuration_utils import PreTrainedConfig
+from ...utils import is_torchdynamo_compiling, logging
 from ...utils.backbone_utils import (
     verify_backbone_config_arguments,
 )
-from ..auto import CONFIG_MAPPING
+from ..auto import CONFIG_MAPPING, AutoConfig
 from ..rt_detr.modeling_rt_detr import (
     RTDetrDecoder,
     RTDetrDecoderLayer,
     RTDetrForObjectDetection,
     RTDetrMLPPredictionHead,
     RTDetrModel,
-    RTDetrMultiscaleDeformableAttention,
     RTDetrPreTrainedModel,
 )
 
@@ -39,7 +39,7 @@ from ..rt_detr.modeling_rt_detr import (
 logger = logging.get_logger(__name__)
 
 
-class RTDetrV2Config(PretrainedConfig):
+class RTDetrV2Config(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`RTDetrV2Model`]. It is used to instantiate a
     RT-DETR model according to the specified arguments, defining the model architecture. Instantiating a configuration
@@ -47,8 +47,8 @@ class RTDetrV2Config(PretrainedConfig):
 
     e.g. [PekingU/rtdetr_r18vd](https://huggingface.co/PekingU/rtdetr_r18vd)
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         initializer_range (`float`, *optional*, defaults to 0.01):
@@ -60,7 +60,7 @@ class RTDetrV2Config(PretrainedConfig):
             The epsilon used by the layer normalization layers.
         batch_norm_eps (`float`, *optional*, defaults to 1e-05):
             The epsilon used by the batch normalization layers.
-        backbone_config (`Dict`, *optional*, defaults to `RTDetrV2ResNetConfig()`):
+        backbone_config (`Union[dict, "PreTrainedConfig"]`, *optional*, defaults to `RTDetrV2ResNetConfig()`):
             The configuration of the backbone model.
         backbone (`str`, *optional*):
             Name of backbone to use when `backbone_config` is `None`. If `use_pretrained_backbone` is `True`, this
@@ -80,7 +80,7 @@ class RTDetrV2Config(PretrainedConfig):
             Dimension of the layers in hybrid encoder.
         encoder_in_channels (`list`, *optional*, defaults to `[512, 1024, 2048]`):
             Multi level features input for encoder.
-        feat_strides (`List[int]`, *optional*, defaults to `[8, 16, 32]`):
+        feat_strides (`list[int]`, *optional*, defaults to `[8, 16, 32]`):
             Strides used in each feature map.
         encoder_layers (`int`, *optional*, defaults to 1):
             Total of layers to be used by the encoder.
@@ -92,7 +92,7 @@ class RTDetrV2Config(PretrainedConfig):
             The ratio for all dropout layers.
         activation_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for activations inside the fully connected layer.
-        encode_proj_layers (`List[int]`, *optional*, defaults to `[2]`):
+        encode_proj_layers (`list[int]`, *optional*, defaults to `[2]`):
             Indexes of the projected layers to be used in the encoder.
         positional_encoding_temperature (`int`, *optional*, defaults to 10000):
             The temperature parameter used to create the positional encodings.
@@ -102,7 +102,7 @@ class RTDetrV2Config(PretrainedConfig):
         activation_function (`str`, *optional*, defaults to `"silu"`):
             The non-linear activation function (function or string) in the general layer. If string, `"gelu"`,
             `"relu"`, `"silu"` and `"gelu_new"` are supported.
-        eval_size (`Tuple[int, int]`, *optional*):
+        eval_size (`tuple[int, int]`, *optional*):
             Height and width used to compute the effective height and width of the position embeddings after taking
             into account the stride.
         normalize_before (`bool`, *optional*, defaults to `False`):
@@ -139,10 +139,8 @@ class RTDetrV2Config(PretrainedConfig):
             Scale or magnitude of noise to be added to the bounding boxes.
         learn_initial_query (`bool`, *optional*, defaults to `False`):
             Indicates whether the initial query embeddings for the decoder should be learned during training
-        anchor_image_size (`Tuple[int, int]`, *optional*):
+        anchor_image_size (`tuple[int, int]`, *optional*):
             Height and width of the input image used during evaluation to generate the bounding box anchors. If None, automatic generate anchor is applied.
-        disable_custom_kernels (`bool`, *optional*, defaults to `True`):
-            Whether to disable custom kernels.
         with_box_refine (`bool`, *optional*, defaults to `True`):
             Whether to apply iterative bounding box refinement, where each decoder layer refines the bounding boxes
             based on the predictions from the previous layer.
@@ -198,6 +196,7 @@ class RTDetrV2Config(PretrainedConfig):
     """
 
     model_type = "rt_detr_v2"
+    sub_configs = {"backbone_config": AutoConfig}
     layer_types = ["basic", "bottleneck"]
     attribute_map = {
         "hidden_size": "d_model",
@@ -249,7 +248,6 @@ class RTDetrV2Config(PretrainedConfig):
         box_noise_scale=1.0,
         learn_initial_query=False,
         anchor_image_size=None,
-        disable_custom_kernels=True,
         with_box_refine=True,
         is_encoder_decoder=True,
         # Loss
@@ -271,7 +269,6 @@ class RTDetrV2Config(PretrainedConfig):
         decoder_method="default",
         **kwargs,
     ):
-        super().__init__(is_encoder_decoder=is_encoder_decoder, **kwargs)
         self.initializer_range = initializer_range
         self.initializer_bias_prior_prob = initializer_bias_prior_prob
         self.layer_norm_eps = layer_norm_eps
@@ -347,7 +344,6 @@ class RTDetrV2Config(PretrainedConfig):
         self.learn_initial_query = learn_initial_query
         self.anchor_image_size = anchor_image_size
         self.auxiliary_loss = auxiliary_loss
-        self.disable_custom_kernels = disable_custom_kernels
         self.with_box_refine = with_box_refine
         # Loss
         self.matcher_alpha = matcher_alpha
@@ -373,22 +369,7 @@ class RTDetrV2Config(PretrainedConfig):
         self.decoder_offset_scale = decoder_offset_scale
         self.decoder_method = decoder_method
 
-    @classmethod
-    def from_backbone_configs(cls, backbone_config: PretrainedConfig, **kwargs):
-        """Instantiate a [`RTDetrV2Config`] (or a derived class) from a pre-trained backbone model configuration and DETR model
-        configuration.
-
-            Args:
-                backbone_config ([`PretrainedConfig`]):
-                    The backbone configuration.
-
-            Returns:
-                [`RTDetrV2Config`]: An instance of a configuration object
-        """
-        return cls(
-            backbone_config=backbone_config,
-            **kwargs,
-        )
+        super().__init__(is_encoder_decoder=is_encoder_decoder, **kwargs)
 
 
 def multi_scale_deformable_attention_v2(
@@ -396,7 +377,7 @@ def multi_scale_deformable_attention_v2(
     value_spatial_shapes: Tensor,
     sampling_locations: Tensor,
     attention_weights: Tensor,
-    num_points_list: List[int],
+    num_points_list: list[int],
     method="default",
 ) -> Tensor:
     batch_size, _, num_heads, hidden_dim = value.shape
@@ -404,7 +385,7 @@ def multi_scale_deformable_attention_v2(
     value_list = (
         value.permute(0, 2, 3, 1)
         .flatten(0, 1)
-        .split([height.item() * width.item() for height, width in value_spatial_shapes], dim=-1)
+        .split([height * width for height, width in value_spatial_shapes], dim=-1)
     )
     # sampling_offsets [8, 480, 8, 12, 2]
     if method == "default":
@@ -466,22 +447,47 @@ def multi_scale_deformable_attention_v2(
 
 
 # the main change
-class RTDetrV2MultiscaleDeformableAttention(RTDetrMultiscaleDeformableAttention):
+class RTDetrV2MultiscaleDeformableAttention(nn.Module):
     """
     RTDetrV2 version of multiscale deformable attention, extending the base implementation
     with improved offset handling and initialization.
     """
 
     def __init__(self, config: RTDetrV2Config):
+        super().__init__()
         num_heads = config.decoder_attention_heads
         n_points = config.decoder_n_points
-        # Initialize parent class with config parameters
-        super().__init__(config=config, num_heads=num_heads, n_points=n_points)
+
+        if config.d_model % num_heads != 0:
+            raise ValueError(
+                f"embed_dim (d_model) must be divisible by num_heads, but got {config.d_model} and {num_heads}"
+            )
+        dim_per_head = config.d_model // num_heads
+        # check if dim_per_head is power of 2
+        if not ((dim_per_head & (dim_per_head - 1) == 0) and dim_per_head != 0):
+            warnings.warn(
+                "You'd better set embed_dim (d_model) in RTDetrV2MultiscaleDeformableAttention to make the"
+                " dimension of each attention head a power of 2 which is more efficient in the authors' CUDA"
+                " implementation."
+            )
+
+        self.im2col_step = 64
+
+        self.d_model = config.d_model
 
         # V2-specific attributes
         self.n_levels = config.decoder_n_levels
+        self.n_heads = num_heads
+        self.n_points = n_points
+
+        self.sampling_offsets = nn.Linear(config.d_model, num_heads * self.n_levels * n_points * 2)
+        self.attention_weights = nn.Linear(config.d_model, num_heads * self.n_levels * n_points)
+        self.value_proj = nn.Linear(config.d_model, config.d_model)
+        self.output_proj = nn.Linear(config.d_model, config.d_model)
+
         self.offset_scale = config.decoder_offset_scale
         self.method = config.decoder_method
+
         # Initialize n_points list and scale
         n_points_list = [self.n_points for _ in range(self.n_levels)]
         self.n_points_list = n_points_list
@@ -497,17 +503,17 @@ class RTDetrV2MultiscaleDeformableAttention(RTDetrMultiscaleDeformableAttention)
         position_embeddings: Optional[torch.Tensor] = None,
         reference_points=None,
         spatial_shapes=None,
+        spatial_shapes_list=None,
         level_start_index=None,
         output_attentions: bool = False,
-        **kwargs,
     ):
         # Process inputs up to sampling locations calculation using parent class logic
         if position_embeddings is not None:
-            hidden_states = self.with_pos_embed(hidden_states, position_embeddings)
+            hidden_states = hidden_states + position_embeddings
 
         batch_size, num_queries, _ = hidden_states.shape
         batch_size, sequence_length, _ = encoder_hidden_states.shape
-        if (spatial_shapes[:, 0] * spatial_shapes[:, 1]).sum() != sequence_length:
+        if not is_torchdynamo_compiling() and (spatial_shapes[:, 0] * spatial_shapes[:, 1]).sum() != sequence_length:
             raise ValueError(
                 "Make sure to align the spatial shapes with the sequence length of the encoder hidden states"
             )
@@ -543,7 +549,7 @@ class RTDetrV2MultiscaleDeformableAttention(RTDetrMultiscaleDeformableAttention)
 
         # V2-specific attention implementation choice
         output = multi_scale_deformable_attention_v2(
-            value, spatial_shapes, sampling_locations, attention_weights, self.n_points_list, self.method
+            value, spatial_shapes_list, sampling_locations, attention_weights, self.n_points_list, self.method
         )
 
         output = self.output_proj(output)
@@ -559,7 +565,11 @@ class RTDetrV2DecoderLayer(RTDetrDecoderLayer):
 
 
 class RTDetrV2PreTrainedModel(RTDetrPreTrainedModel):
-    pass
+    def _init_weights(self, module):
+        super()._init_weights(module)
+        if isinstance(module, RTDetrV2MultiscaleDeformableAttention):
+            n_points_scale = [1 / n for n in module.n_points_list for _ in range(n)]
+            init.copy_(module.n_points_scale, torch.tensor(n_points_scale, dtype=torch.float32))
 
 
 class RTDetrV2Decoder(RTDetrDecoder):
@@ -580,18 +590,26 @@ class RTDetrV2MLPPredictionHead(RTDetrMLPPredictionHead):
 
 
 class RTDetrV2ForObjectDetection(RTDetrForObjectDetection, RTDetrV2PreTrainedModel):
+    _tied_weights_keys = {
+        r"bbox_embed.(?![0])\d+": r"bbox_embed.0",
+        r"class_embed.(?![0])\d+": r"^class_embed.0",
+        "model.decoder.class_embed": "class_embed",
+        "model.decoder.bbox_embed": "bbox_embed",
+    }
+
     def __init__(self, config: RTDetrV2Config):
-        RTDetrV2PreTrainedModel.__init__(config)
+        RTDetrV2PreTrainedModel.__init__(self, config)
         # RTDETR encoder-decoder model
         self.model = RTDetrV2Model(config)
-
-        # Detection heads on top
-        class_embed = partial(nn.Linear, config.d_model, config.num_labels)
-        bbox_embed = partial(RTDetrV2MLPPredictionHead, config, config.d_model, config.d_model, 4, num_layers=3)
-
-        self.class_embed = nn.ModuleList([class_embed() for _ in range(config.decoder_layers)])
-        self.bbox_embed = nn.ModuleList([bbox_embed() for _ in range(config.decoder_layers)])
-
+        self.class_embed = nn.ModuleList(
+            [torch.nn.Linear(config.d_model, config.num_labels) for _ in range(config.decoder_layers)]
+        )
+        self.bbox_embed = nn.ModuleList(
+            [
+                RTDetrV2MLPPredictionHead(config, config.d_model, config.d_model, 4, num_layers=3)
+                for _ in range(config.decoder_layers)
+            ]
+        )
         self.model.decoder.class_embed = self.class_embed
         self.model.decoder.bbox_embed = self.bbox_embed
 
